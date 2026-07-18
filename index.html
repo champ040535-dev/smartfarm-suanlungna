@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>สวนลุงนะ ฟาร์ม - Smart Control</title>
+    <meta name="theme-color" content="#1a1a1a">
+    <link rel="manifest" href="manifest.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Kanit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            overflow-x: hidden;
+        }
+
+        .hidden { display: none !important; }
+
+        /* ===== LOGIN PAGE ===== */
+        #loginPage {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            z-index: 1000;
+        }
+
+        .login-container {
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+            padding: 48px 32px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+        }
+
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-logo img {
+            width: 100px;
+            height: 100px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(255, 0, 0, 0.2);
+        }
+
+        .login-title {
+            text-align: center;
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #ff0000, #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .login-subtitle {
+            text-align: center;
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 32px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            font-family: 'Kanit', sans-serif;
+            color: #fff;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.08);
+            border-color: #ff0000;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.2);
+        }
+
+        .form-input::placeholder {
+            color: #666;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #ff0000, #cc0000);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(255, 0, 0, 0.3);
+            font-family: 'Kanit', sans-serif;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(255, 0, 0, 0.4);
+        }
+
+        /* ===== DASHBOARD ===== */
+        #dashboard {
+            background: #0a0a0a;
+            min-height: 100vh;
+            padding-bottom: 40px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dashboard-header {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header-logo img {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+        }
+
+        .header-info h1 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+
+        .header-info p {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .header-time {
+            font-size: 13px;
+            color: #ff0000;
+            font-weight: 600;
+        }
+
+        .header-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .header-btn {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid rgba(255, 0, 0, 0.2);
+            color: #ff0000;
+            border-radius: 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            font-size: 16px;
+        }
+
+        .header-btn:hover {
+            background: rgba(255, 0, 0, 0.2);
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.2);
+        }
+
+        .container {
+            flex: 1;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ===== STATUS CARDS ===== */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 15px;
+            margin-bottom: 40px;
+            width: 100%;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .status-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #ff0000, transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .status-card:hover {
+            background: rgba(255, 0, 0, 0.05);
+            border-color: rgba(255, 0, 0, 0.2);
+            transform: translateY(-4px);
+        }
+
+        .status-card:hover::before {
+            opacity: 1;
+        }
+
+        .status-icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .status-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: #888;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #ff0000;
+        }
+
+        /* ===== ALERT ===== */
+        .alert {
+            padding: 16px;
+            border-radius: 16px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            animation: slideDown 0.3s ease;
+            width: 100%;
+        }
+
+        .alert-warning {
+            background: rgba(255, 152, 0, 0.1);
+            border-color: rgba(255, 152, 0, 0.3);
+            color: #ffb74d;
+        }
+
+        .alert-success {
+            background: rgba(76, 175, 80, 0.1);
+            border-color: rgba(76, 175, 80, 0.3);
+            color: #81c784;
+        }
+
+        .alert-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        /* ===== PUMP CONTROL SECTION (CIRCULAR) ===== */
+        .pump-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+            width: 100%;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+        }
+
+        .section-title i {
+            color: #ff0000;
+            font-size: 24px;
+        }
+
+        /* ===== CIRCULAR PUMP CONTROL ===== */
+        .pump-circle-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .pump-circle-glow {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 0, 0, 0.3), transparent);
+            box-shadow: 0 0 40px rgba(255, 0, 0, 0.4), inset 0 0 40px rgba(255, 0, 0, 0.2);
+            border: 3px solid rgba(255, 0, 0, 0.5);
+            transition: all 0.5s ease;
+            animation: pulse-red 2s infinite;
+        }
+
+        .pump-circle-glow.active {
+            background: radial-gradient(circle, rgba(0, 255, 0, 0.3), transparent);
+            box-shadow: 0 0 60px rgba(0, 255, 0, 0.6), inset 0 0 60px rgba(0, 255, 0, 0.2);
+            border: 3px solid rgba(0, 255, 0, 0.8);
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 40px rgba(255, 0, 0, 0.4), inset 0 0 40px rgba(255, 0, 0, 0.2); }
+            50% { box-shadow: 0 0 60px rgba(255, 0, 0, 0.6), inset 0 0 60px rgba(255, 0, 0, 0.3); }
+        }
+
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 60px rgba(0, 255, 0, 0.6), inset 0 0 60px rgba(0, 255, 0, 0.2); }
+            50% { box-shadow: 0 0 80px rgba(0, 255, 0, 0.8), inset 0 0 80px rgba(0, 255, 0, 0.4); }
+        }
+
+        .pump-circle-inner {
+            position: absolute;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+            backdrop-filter: blur(20px);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 20px;
+            z-index: 2;
+        }
+
+        .pump-status-display {
+            text-align: center;
+        }
+
+        .pump-status-icon {
+            font-size: 60px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .pump-status-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .pump-status-sub {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        /* ===== PUMP BUTTONS ===== */
+        .pump-controls {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .pump-btn {
+            padding: 16px 32px;
+            border: none;
+            border-radius: 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Kanit', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .pump-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            transition: left 0.3s ease;
+        }
+
+        .pump-btn:hover::before {
+            left: 100%;
+        }
+
+        .pump-btn i {
+            font-size: 20px;
+            z-index: 1;
+        }
+
+        .pump-btn span {
+            z-index: 1;
+        }
+
+        .pump-on {
+            background: linear-gradient(135deg, #00ff00, #00cc00);
+            color: #000;
+            box-shadow: 0 10px 30px rgba(0, 255, 0, 0.3);
+        }
+
+        .pump-on:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 15px 40px rgba(0, 255, 0, 0.5);
+        }
+
+        .pump-off {
+            background: linear-gradient(135deg, #ff0000, #cc0000);
+            color: white;
+            box-shadow: 0 10px 30px rgba(255, 0, 0, 0.3);
+        }
+
+        .pump-off:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 15px 40px rgba(255, 0, 0, 0.5);
+        }
+
+        /* ===== BOTTOM NAV ===== */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-around;
+            padding: 12px 0;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #666;
+            text-decoration: none;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .nav-item:hover,
+        .nav-item.active {
+            color: #ff0000;
+        }
+
+        .nav-icon {
+            font-size: 24px;
+        }
+
+        /* ===== ANIMATIONS ===== */
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .pump-circle-container {
+                width: 240px;
+                height: 240px;
+            }
+
+            .pump-circle-inner {
+                width: 200px;
+                height: 200px;
+            }
+
+            .pump-status-icon {
+                font-size: 48px;
+            }
+
+            .pump-controls {
+                gap: 15px;
+            }
+
+            .pump-btn {
+                padding: 14px 24px;
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- LOGIN PAGE -->
+    <div id="loginPage">
+        <div class="login-container">
+            <div class="login-logo">
+                <img src="suanlungna_icon_180.png" alt="Logo">
+            </div>
+            <h2 class="login-title">สวนลุงนะ ฟาร์ม</h2>
+            <p class="login-subtitle">Smart Farm Control System</p>
+            
+            <div class="form-group">
+                <label class="form-label">อีเมล</label>
+                <input type="email" id="email" class="form-input" placeholder="กรุณากรอกอีเมล">
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label">รหัสผ่าน</label>
+                <input type="password" id="password" class="form-input" placeholder="กรุณากรอกรหัสผ่าน">
+            </div>
+            
+            <button class="login-btn" onclick="login()">เข้าสู่ระบบ</button>
+        </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard" class="hidden">
+        <div class="dashboard-header">
+            <div class="header-left">
+                <div class="header-logo">
+                    <img src="suanlungna_icon_180.png" alt="Logo">
+                </div>
+                <div class="header-info">
+                    <h1>สวนลุงนะ</h1>
+                    <p>Smart Farm Control</p>
+                    <div class="header-time" id="headerTime">--:--:--</div>
+                </div>
+            </div>
+            <div class="header-controls">
+                <button class="header-btn" onclick="toggleDarkMode()" title="Dark Mode">
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button class="header-btn" onclick="logout()" title="Logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="container">
+            <div id="rainAlert"></div>
+
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="status-icon">🌡️</div>
+                    <div class="status-label">อุณหภูมิ</div>
+                    <div class="status-value" id="weather_api">--</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-icon">☔</div>
+                    <div class="status-label">โอกาสฝน</div>
+                    <div class="status-value" id="rainChance">--</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-icon">📡</div>
+                    <div class="status-label">ระบบ</div>
+                    <div class="status-value" id="nodeStatus" style="color: #ff0000;">OFFLINE</div>
+                </div>
+            </div>
+
+            <div class="pump-section">
+                <div class="section-title">
+                    <i class="fas fa-water"></i> ควบคุมปั๊มน้ำ
+                </div>
+
+                <!-- Circular Control -->
+                <div class="pump-circle-container">
+                    <div class="pump-circle-glow" id="pumpGlow"></div>
+                    <div class="pump-circle-inner">
+                        <div class="pump-status-display">
+                            <div class="pump-status-icon" id="pumpStatusIcon">🔴</div>
+                            <div class="pump-status-text" id="pumpStatusText">ปิดทำงาน</div>
+                            <div class="pump-status-sub">สถานะปัจจุบัน</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="pump-controls">
+                    <button class="pump-btn pump-on" onclick="sendPumpCommand('ON')">
+                        <i class="fas fa-play"></i>
+                        <span>เปิดปั๊ม</span>
+                    </button>
+                    <button class="pump-btn pump-off" onclick="sendPumpCommand('OFF')">
+                        <i class="fas fa-stop"></i>
+                        <span>ปิดปั๊ม</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="bottom-nav">
+            <div class="nav-item active">
+                <span class="nav-icon"><i class="fas fa-home"></i></span>
+                <span>หน้าหลัก</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let client = null;
+        let darkMode = localStorage.getItem('darkMode') === 'true';
+        let pumpStatus = 'OFF';
+
+        window.onload = () => {
+            if (darkMode) document.body.classList.add('dark-mode');
+            const savedEmail = localStorage.getItem('farmEmail');
+            if (savedEmail) loginSuccess(savedEmail);
+        };
+
+        function login() {
+            const email = document.getElementById('email').value;
+            if (email.includes('@')) {
+                localStorage.setItem('farmEmail', email);
+                loginSuccess(email);
+            } else { alert('กรุณากรอกอีเมลที่ถูกต้อง'); }
+        }
+
+        function loginSuccess(email) {
+            document.getElementById('loginPage').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            initMQTT();
+            loadWeather();
+            setInterval(() => { 
+                document.getElementById('headerTime').textContent = new Date().toLocaleTimeString('th-TH'); 
+            }, 1000);
+            setInterval(loadWeather, 600000);
+        }
+
+        function logout() { localStorage.removeItem('farmEmail'); location.reload(); }
+        function toggleDarkMode() { darkMode = !darkMode; localStorage.setItem('darkMode', darkMode); }
+
+        function updatePumpUI(status) {
+            pumpStatus = status;
+            const glow = document.getElementById('pumpGlow');
+            const icon = document.getElementById('pumpStatusIcon');
+            const text = document.getElementById('pumpStatusText');
+
+            if (status === 'ON') {
+                glow.classList.add('active');
+                icon.textContent = '🟢';
+                text.textContent = 'เปิดทำงาน';
+            } else {
+                glow.classList.remove('active');
+                icon.textContent = '🔴';
+                text.textContent = 'ปิดทำงาน';
+            }
+        }
+
+        function initMQTT() {
+            client = mqtt.connect('wss://650188a0ee2b4367b7c131fb385590a9.s1.eu.hivemq.cloud:8884/mqtt', {
+                username: 'smartfarm',
+                password: 'Kla12345',
+                clientId: 'web_' + Math.random().toString(16).substr(2, 8)
+            });
+
+            client.on('connect', () => {
+                document.getElementById('nodeStatus').textContent = 'ONLINE';
+                document.getElementById('nodeStatus').style.color = '#00ff00';
+                client.subscribe('farm/pump/status');
+            });
+
+            client.on('message', (topic, message) => {
+                if (topic === 'farm/pump/status') {
+                    const msg = message.toString();
+                    updatePumpUI(msg);
+                }
+            });
+
+            client.on('offline', () => {
+                document.getElementById('nodeStatus').textContent = 'OFFLINE';
+                document.getElementById('nodeStatus').style.color = '#ff0000';
+            });
+        }
+
+        function sendPumpCommand(cmd) {
+            if (client && client.connected) { 
+                client.publish('farm/pump/control', cmd);
+                updatePumpUI(cmd);
+            }
+            else { alert('ไม่ได้เชื่อมต่อระบบ'); }
+        }
+
+        async function loadWeather() {
+            const lat = 7.7333; const lon = 100.0000;
+            try {
+                const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,rain&hourly=precipitation_probability&timezone=Asia/Bangkok`);
+                const data = await res.json();
+                document.getElementById('weather_api').textContent = `${data.current.temperature_2m}°C`;
+                const rainProb = data.hourly.precipitation_probability[0];
+                document.getElementById('rainChance').textContent = rainProb + '%';
+                const alertDiv = document.getElementById('rainAlert');
+                if (rainProb > 60) {
+                    alertDiv.innerHTML = `<div class="alert alert-warning"><i class="fas fa-cloud-showers-heavy"></i> <div>ฝนอาจจะตก (${rainProb}%) แนะนำให้ตรวจสอบการรดน้ำ</div></div>`;
+                } else {
+                    alertDiv.innerHTML = `<div class="alert alert-success"><i class="fas fa-sun"></i> <div>อากาศแจ่มใส เหมาะแก่การดูแลสวน</div></div>`;
+                }
+            } catch(e) { console.log("Weather API error"); }
+        }
+    </script>
+</body>
+</html>
