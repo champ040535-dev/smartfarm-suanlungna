@@ -14,8 +14,8 @@
 // ==================================================================================================================
 // 1. WiFi Configuration
 // ==================================================================================================================
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid = "Klanarong-2.4G";
+const char* password = "kla56435";
 
 // ==================================================================================================================
 // 2. MQTT Configuration (HiveMQ Cloud with TLS)
@@ -37,8 +37,8 @@ const char* MQTT_TOPIC_LOG = "smartfarm/log";
 // ==================================================================================================================
 // 3. Telegram Configuration
 // ==================================================================================================================
-#define TELEGRAM_BOT_TOKEN "YOUR_TELEGRAM_BOT_TOKEN" // Replace with your bot token
-#define TELEGRAM_CHAT_ID "YOUR_TELEGRAM_CHAT_ID"     // Replace with your chat ID
+#define TELEGRAM_BOT_TOKEN "8871197910:AAESUuL4cTeBnCkmVwv6aO4sKAMNlKCC5po" // Replace with your bot token
+#define CHAT_ID "8698930095"     // Replace with your chat ID
 
 WiFiClientSecure espClientSecure; // For MQTT TLS
 PubSubClient mqttClient(espClientSecure);
