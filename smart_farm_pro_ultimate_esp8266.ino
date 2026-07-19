@@ -24,7 +24,7 @@ const char* mqtt_server = "650188a0ee2b4367b7c131fb385590a9.s1.eu.hivemq.cloud";
 const int mqtt_port = 8883; // TLS port
 const char* mqtt_username = "smartfarm";
 const char* mqtt_password = "Kla12345";
-String mqtt_client_id = "ESP8266_" + String(ESP.getChipId(), HEX); // Unique Client ID
+String mqtt_client_id = "";
 
 // MQTT Topics
 const char* MQTT_TOPIC_SENSOR_DATA = "smartfarm/sensor/data";
@@ -80,7 +80,17 @@ int autoWateringDuration = 30;  // seconds
 int autoWateringInterval = 60;  // minutes
 unsigned long lastAutoWateringTime = 0;
 
-// Timers
+// Timers (for manual scheduling with millis())
+unsigned long lastSensorReadTime = 0;
+unsigned long lastMqttPublishTime = 0;
+unsigned long lastAutoWateringCheckTime = 0;
+unsigned long lastWifiReconnectTime = 0;
+unsigned long lastMqttReconnectTime = 0;
+unsigned long lastWatchdogFeedTime = 0;
+unsigned long lastAutoWateringDurationTime = 0;
+bool autoWateringDurationActive = false;
+
+// Ticker objects (for backwards compatibility)
 Ticker wifiReconnectTicker;
 Ticker mqttReconnectTicker;
 Ticker sensorReadTicker;
@@ -93,6 +103,10 @@ ESP8266WebServer server(80);
 
 // RTC
 RTC_DS3231 rtc;
+
+// Telegram update tracking
+unsigned long lastTelegramCheckTime = 0;
+int lastTelegramUpdateId = 0;
 
 // ==================================================================================================================
 // 6. Function Prototypes
@@ -132,6 +146,9 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\nBooting Smart Farm PRO Ultimate...");
 
+  // Initialize MQTT Client ID
+  mqtt_client_id = "ESP8266_" + String(ESP.getChipId(), HEX);
+
   // Initialize EEPROM
   EEPROM.begin(512); // Allocate 512 bytes for EEPROM
   loadStateFromEEPROM();
@@ -144,12 +161,18 @@ void setup() {
 
   // Restore relay states
   setRelayState(PUMP_RELAY_PIN, pumpState, "Pump", MQTT_TOPIC_PUMP_STATUS);
-  setRelayState(ZONE1_RELAY_PIN, zoneState[1], "Zone 1", String(MQTT_TOPIC_ZONE_STATUS).replace("%d", "1").c_str());
-  setRelayState(ZONE2_RELAY_PIN, zoneState[2], "Zone 2", String(MQTT_TOPIC_ZONE_STATUS).replace("%d", "2").c_str());
-  setRelayState(ZONE3_RELAY_PIN, zoneState[3], "Zone 3", String(MQTT_TOPIC_ZONE_STATUS).replace("%d", "3").c_str());
+  
+  // Fix String::replace() usage - create new string with format
+  String zone1Topic = "smartfarm/zone/1/status";
+  String zone2Topic = "smartfarm/zone/2/status";
+  String zone3Topic = "smartfarm/zone/3/status";
+  
+  setRelayState(ZONE1_RELAY_PIN, zoneState[1], "Zone 1", zone1Topic.c_str());
+  setRelayState(ZONE2_RELAY_PIN, zoneState[2], "Zone 2", zone2Topic.c_str());
+  setRelayState(ZONE3_RELAY_PIN, zoneState[3], "Zone 3", zone3Topic.c_str());
 
   // Setup WiFi
-  WiFi.mode(WiFiMode_STA);
+  WiFi.mode(WIFI_STA);
   WiFi.onStationModeGotIP(onWiFiConnect);
   WiFi.onStationModeDisconnected(onWiFiDisconnect);
   setupWiFi();
@@ -181,7 +204,7 @@ void setup() {
   // Setup Web Server
   setupWebServer();
 
-  // Setup Tickers (non-blocking timers)
+  // Setup Tickers (using attach for periodic calls - modernized API)
   sensorReadTicker.attach(5, readSensors); // Read sensors every 5 seconds
   mqttPublishTicker.attach(5, publishSensorData); // Publish sensor data every 5 seconds
   autoWateringTicker.attach(60, autoWateringCheck); // Check auto watering every 60 seconds
@@ -195,12 +218,24 @@ void setup() {
 // 8. Loop
 // ==================================================================================================================
 void loop() {
-  // Handle WiFi and MQTT connections
+  // Handle WiFi reconnection with timeout-based scheduling
   if (WiFi.status() != WL_CONNECTED) {
-    wifiReconnectTicker.tick();
+    if (millis() - lastWifiReconnectTime > 5000) {
+      setupWiFi();
+      lastWifiReconnectTime = millis();
+    }
+  } else {
+    lastWifiReconnectTime = millis();
   }
+
+  // Handle MQTT reconnection with timeout-based scheduling
   if (!mqttClient.connected()) {
-    mqttReconnectTicker.tick();
+    if (millis() - lastMqttReconnectTime > 5000) {
+      reconnectMQTT();
+      lastMqttReconnectTime = millis();
+    }
+  } else {
+    lastMqttReconnectTime = millis();
   }
 
   mqttClient.loop();
@@ -208,11 +243,8 @@ void loop() {
   ArduinoOTA.handle();
   handleTelegramMessages();
 
-  // Ticker updates
-  sensorReadTicker.tick();
-  mqttPublishTicker.tick();
-  autoWateringTicker.tick();
-  watchdogFeedTicker.tick();
+  // Ticker automatically handles timing via attach()
+  // No explicit tick() calls needed
 }
 
 // ==================================================================================================================
@@ -222,8 +254,6 @@ void setupWiFi() {
   Serial.print("Connecting to WiFi: ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
-  // Use a ticker for non-blocking reconnect attempts
-  wifiReconnectTicker.once(10, setupWiFi); // Try again in 10 seconds if not connected
 }
 
 void onWiFiConnect(const WiFiEventStationModeGotIP& event) {
@@ -234,7 +264,6 @@ void onWiFiConnect(const WiFiEventStationModeGotIP& event) {
   Serial.println(WiFi.RSSI());
   logMessage("WiFi: Connected, IP: " + WiFi.localIP().toString() + ", RSSI: " + String(WiFi.RSSI()));
   sendTelegramMessage("✅ WiFi Connected! IP: " + WiFi.localIP().toString());
-  wifiReconnectTicker.detach(); // Stop reconnect attempts once connected
   reconnectMQTT(); // Attempt MQTT connection after WiFi is up
 }
 
@@ -243,7 +272,6 @@ void onWiFiDisconnect(const WiFiEventStationModeDisconnected& event) {
   logMessage("WiFi: Disconnected");
   sendTelegramMessage("❌ WiFi Disconnected! Reconnecting...");
   mqttClient.disconnect(); // Disconnect MQTT if WiFi drops
-  wifiReconnectTicker.once(5, setupWiFi); // Try to reconnect WiFi in 5 seconds
 }
 
 // ==================================================================================================================
@@ -266,13 +294,11 @@ void reconnectMQTT() {
       mqttClient.publish(topic, zoneState[i] ? "ON" : "OFF", true);
     }
     mqttClient.publish(MQTT_TOPIC_AUTO_STATUS, autoWateringEnabled ? "ON" : "OFF", true);
-    mqttReconnectTicker.detach(); // Stop reconnect attempts once connected
   } else {
     Serial.print("failed, rc=");
     Serial.print(mqttClient.state());
     Serial.println(" trying again in 5 seconds");
     logMessage("MQTT: Connection failed, RC: " + String(mqttClient.state()));
-    mqttReconnectTicker.once(5, reconnectMQTT); // Try again in 5 seconds
   }
 }
 
@@ -387,15 +413,15 @@ void handleZoneCommand(int zoneNum, String command) {
   if (command == "on") {
     if (!zoneState[zoneNum]) {
       zoneState[zoneNum] = true;
-      setRelayState( (zoneNum == 1) ? ZONE1_RELAY_PIN : (zoneNum == 2) ? ZONE2_RELAY_PIN : ZONE3_RELAY_PIN, 
-                     zoneState[zoneNum], ("Zone " + String(zoneNum)).c_str(), topic);
+      int pin = (zoneNum == 1) ? ZONE1_RELAY_PIN : (zoneNum == 2) ? ZONE2_RELAY_PIN : ZONE3_RELAY_PIN;
+      setRelayState(pin, zoneState[zoneNum], ("Zone " + String(zoneNum)).c_str(), topic);
       sendTelegramMessage("🌱 Zone " + String(zoneNum) + " ON by command!");
     }
   } else if (command == "off") {
     if (zoneState[zoneNum]) {
       zoneState[zoneNum] = false;
-      setRelayState( (zoneNum == 1) ? ZONE1_RELAY_PIN : (zoneNum == 2) ? ZONE2_RELAY_PIN : ZONE3_RELAY_PIN, 
-                     zoneState[zoneNum], ("Zone " + String(zoneNum)).c_str(), topic);
+      int pin = (zoneNum == 1) ? ZONE1_RELAY_PIN : (zoneNum == 2) ? ZONE2_RELAY_PIN : ZONE3_RELAY_PIN;
+      setRelayState(pin, zoneState[zoneNum], ("Zone " + String(zoneNum)).c_str(), topic);
       sendTelegramMessage("🍂 Zone " + String(zoneNum) + " OFF by command!");
     }
   }
@@ -428,29 +454,33 @@ void handleAutoCommand(String command) {
 void autoWateringCheck() {
   if (!autoWateringEnabled) return;
 
-  DateTime now = rtc.now();
-  unsigned long currentMillis = now.unixtime();
+  unsigned long currentMillis = millis();
 
   // Check soil moisture threshold
   if (soilMoisture < autoWateringThreshold) {
     // Check if enough time has passed since last auto watering
-    if (currentMillis - lastAutoWateringTime > (unsigned long)autoWateringInterval * 60) {
+    if (currentMillis - lastAutoWateringTime > (unsigned long)autoWateringInterval * 60000) {
       Serial.println("Auto Watering: Soil too dry, starting pump...");
       logMessage("Auto Watering: Soil dry, pump ON");
       sendTelegramMessage("💦 Auto Watering: ดินแห้ง! เปิดปั๊มอัตโนมัติ.");
       
       handlePumpCommand("on");
-      // Set a timer to turn off the pump after autoWateringDuration
-      autoWateringTicker.once(autoWateringDuration, [](){
-        handlePumpCommand("off");
-        sendTelegramMessage("💧 Auto Watering: ปิดปั๊มอัตโนมัติ (ครบเวลา).");
-        logMessage("Auto Watering: Pump OFF (duration complete)");
-      });
+      autoWateringDurationActive = true;
+      lastAutoWateringDurationTime = currentMillis;
       lastAutoWateringTime = currentMillis;
       saveStateToEEPROM();
     }
   }
-  // Add RTC schedule logic here if needed (e.g., water at specific times regardless of soil)
+
+  // Check if auto watering duration has elapsed
+  if (autoWateringDurationActive) {
+    if (currentMillis - lastAutoWateringDurationTime > (unsigned long)autoWateringDuration * 1000) {
+      handlePumpCommand("off");
+      sendTelegramMessage("💧 Auto Watering: ปิดปั๊มอัตโนมัติ (ครบเวลา).");
+      logMessage("Auto Watering: Pump OFF (duration complete)");
+      autoWateringDurationActive = false;
+    }
+  }
 }
 
 // ==================================================================================================================
@@ -566,7 +596,7 @@ void handleApiControl() {
 void setupOTA() {
   ArduinoOTA.onStart([]() {
     String type;
-    if (ArduinoOTA.get== OTA_UPDATE_BEGIN) {
+    if (ArduinoOTA.getCommand() == U_FLASH) {
       type = "firmware";
     } else {
       type = "filesystem";
@@ -614,8 +644,10 @@ void sendTelegramMessage(String msg) {
 }
 
 void handleTelegramMessages() {
-  if (millis() > bot.lastUpdateTime + 1000) { // Check for new messages every second
-    int numNewMessages = bot.getUpdates(bot.lastUpdateTime + 1);
+  if (millis() - lastTelegramCheckTime > 1000) { // Check for new messages every second
+    lastTelegramCheckTime = millis();
+    int numNewMessages = bot.getUpdates(lastTelegramUpdateId + 1);
+    
     while (numNewMessages) {
       Serial.println("Telegram: Got " + String(numNewMessages) + " new messages");
       for (int i = 0; i < numNewMessages; i++) {
@@ -676,8 +708,8 @@ void handleTelegramMessages() {
           }
         }
       }
-      bot.lastUpdateTime = bot.messages[numNewMessages - 1].date; // Update last update time
-      numNewMessages = bot.getUpdates(bot.lastUpdateTime + 1); // Get next batch
+      lastTelegramUpdateId = bot.messages[numNewMessages - 1].message_id;
+      numNewMessages = bot.getUpdates(lastTelegramUpdateId + 1); // Get next batch
     }
   }
 }
@@ -749,7 +781,7 @@ void logMessage(String msg) {
 // - RTC setup assumes DS3231. If using another RTC, adjust RTClib usage.
 // - Telegram bot commands are basic. Expand as needed.
 // - The `espClientSecure.setInsecure()` is for development/testing. For production, proper certificate validation is recommended.
-// - The `ArduinoJson` library is used for sensor data. Ensure it's installed (e.g., v6).
-// - `UniversalTelegramBot` library is used. Ensure it's installed.
+// - The `ArduinoJson` library is used for sensor data. Ensure it's installed (v7.x).
+// - `UniversalTelegramBot` library is used. Ensure it's installed (v1.3.0+).
 // - `RTClib` library is used. Ensure it's installed.
 // - `DHT` library is used. Ensure it's installed.
